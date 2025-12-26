@@ -126,6 +126,14 @@ easytier-ws-relay/
 - 客户端状态管理与心跳维持
 - RPC 请求/响应处理机制
 
+## 纯 P2P 模式
+
+在 `wrangler.toml` 的 `[vars]` 中配置：
+- `EASYTIER_DISABLE_RELAY`: `"1"` 开启纯 P2P，默认 `"0"`
+- `EASYTIER_COMPRESS_RPC`: `"0"` 关闭 RPC 压缩（调试用），默认 `"1"`
+
+修改完配置后按正常方式运行 `wrangler dev` 或部署即可生效。
+
 ## 客户端连接说明
 
 部署后，EasyTier 客户端连接地址需要添加路径 `/ws`。

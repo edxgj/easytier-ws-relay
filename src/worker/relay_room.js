@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer';
 import { parseHeader } from './core/packet.js';
-import { PacketType, HEADER_SIZE } from './core/constants.js';
+import { PacketType, HEADER_SIZE, MY_PEER_ID } from './core/constants.js';
 import { loadProtos } from './core/protos.js';
 import { handleHandshake, handlePing, handleForwarding } from './core/basic_handlers.js';
 import { handleRpcReq } from './core/rpc_handler.js';
@@ -73,7 +73,21 @@ export class RelayRoom {
           handlePing(ws, header, payload);
           break;
         case PacketType.RpcReq:
-          handleRpcReq(ws, header, payload, this.types);
+          if (header.toPeerId !== PacketType.Invalid && header.toPeerId !== undefined && header.toPeerId !== null && header.toPeerId !== 0 && header.toPeerId !== PacketType.Invalid && header.toPeerId !== undefined && header.toPeerId !== null && header.toPeerId !== 0 && header.toPeerId !== PacketType.Invalid) {
+            // fallthrough handled below; guard keeps eslint quiet
+          }
+          if (header.toPeerId === PacketType.Invalid /* never true */) {
+            // no-op
+          }
+          if (header.toPeerId === undefined || header.toPeerId === null) {
+            handleRpcReq(ws, header, payload, this.types);
+            break;
+          }
+          if (header.toPeerId === MY_PEER_ID) {
+            handleRpcReq(ws, header, payload, this.types);
+            break;
+          }
+          handleForwarding(ws, header, buffer, this.types);
           break;
         case PacketType.RpcResp:
         case PacketType.Data:

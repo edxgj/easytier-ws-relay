@@ -81,6 +81,8 @@ export class PeerManager {
     this.myInfo = null; // lazily initialized to avoid random in global scope
     this.sessionTtlMs = Number(process.env.EASYTIER_SESSION_TTL_MS || 3 * 60 * 1000);
     this.lastSessionCleanup = 0;
+
+    this.pureP2PMode = (process.env.EASYTIER_DISABLE_RELAY === '1');
   }
 
   setTypes(types) {
@@ -94,7 +96,12 @@ export class PeerManager {
       instId: makeInstId(),
       cost: 1,
       version: 1,
-      featureFlag: { isPublicServer: true, avoidRelayData: false, kcpInput: false, noRelayKcp: false },
+      featureFlag: {
+        isPublicServer: true,
+        avoidRelayData: this.pureP2PMode,
+        kcpInput: false,
+        noRelayKcp: false
+      },
       networkLength: Number(process.env.EASYTIER_NETWORK_LENGTH || 24),
       easytierVersion: process.env.EASYTIER_VERSION || "cf-ws-relay",
       lastUpdate: { seconds: Math.floor(Date.now() / 1000), nanos: 0 },
@@ -174,6 +181,22 @@ export class PeerManager {
     if (next !== prev) {
       this.bumpMyInfoVersion();
     }
+  }
+
+  setPureP2PMode(enabled) {
+    const next = !!enabled;
+    if (next === this.pureP2PMode) return;
+    this.pureP2PMode = next;
+    const myInfo = this.ensureMyInfo();
+    myInfo.featureFlag = {
+      ...myInfo.featureFlag,
+      avoidRelayData: this.pureP2PMode,
+    };
+    this.bumpMyInfoVersion();
+  }
+
+  isPureP2PMode() {
+    return !!this.pureP2PMode;
   }
 
   _getPeersMap(groupKey, create = false) {

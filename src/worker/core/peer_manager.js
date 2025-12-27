@@ -241,6 +241,7 @@ export class PeerManager {
         connBitmapVerMap: new Map(),
         foreignNetVer: 0,
         lastTouch: Date.now(),
+        lastConnBitmapSig: null,
       };
       g.set(peerId, s);
     }
@@ -267,6 +268,7 @@ export class PeerManager {
       s.peerInfoVerMap.clear();
       s.connBitmapVerMap.clear();
       s.foreignNetVer = 0;
+      s.lastConnBitmapSig = null;
     }
     s.dstSessionId = theirSessionId;
     if (typeof weAreInitiator === 'boolean') {
@@ -432,9 +434,10 @@ export class PeerManager {
 
     let connBitmap = null;
     if (relevantPeers.length > 0) {
+      const connVersions = this._getPeerConnVersionMap(groupKey, true);
       const peerIdVersions = relevantPeers.map((pid) => {
-        const version = this.bumpPeerConnVersion(groupKey, pid);
-        return { peerId: pid, version: version };
+        const existing = connVersions.get(pid) || 1;
+        return { peerId: pid, version: existing };
       });
       const N = peerIdVersions.length;
       const bitmapSize = Math.ceil((N * N) / 8);
@@ -464,10 +467,15 @@ export class PeerManager {
           }
         }
       }
+      const bitmapBuf = Buffer.from(bitmap);
+      const sig = `${peerIdVersions.map(p => `${p.peerId}:${p.version}`).join(',')}|${bitmapBuf.toString('hex')}`;
       const connVersion = session.connBitmapVerMap.get(targetPeerId) || 0;
-      const nextConnVersion = connVersion + 1;
-      session.connBitmapVerMap.set(targetPeerId, nextConnVersion);
-      connBitmap = { peerIds: peerIdVersions, bitmap: Buffer.from(bitmap), version: nextConnVersion };
+      const nextConnVersion = connVersion || Math.max(...peerIdVersions.map(p => p.version));
+      if (sig !== session.lastConnBitmapSig) {
+        session.connBitmapVerMap.set(targetPeerId, nextConnVersion);
+        session.lastConnBitmapSig = sig;
+        connBitmap = { peerIds: peerIdVersions, bitmap: bitmapBuf, version: nextConnVersion };
+      }
     }
 
     const foreignNetworkInfos = (() => {

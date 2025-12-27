@@ -3,7 +3,7 @@ import { parseHeader } from './core/packet.js';
 import { PacketType, HEADER_SIZE, MY_PEER_ID } from './core/constants.js';
 import { loadProtos } from './core/protos.js';
 import { handleHandshake, handlePing, handleForwarding } from './core/basic_handlers.js';
-import { handleRpcReq } from './core/rpc_handler.js';
+import { handleRpcReq, handleRpcResp } from './core/rpc_handler.js';
 import { getPeerManager } from './core/peer_manager.js';
 import { randomU64String } from './core/crypto.js';
 
@@ -90,6 +90,10 @@ export class RelayRoom {
           handleForwarding(ws, header, buffer, this.types);
           break;
         case PacketType.RpcResp:
+          if (header.toPeerId === undefined || header.toPeerId === null || header.toPeerId === MY_PEER_ID) {
+            handleRpcResp(ws, header, payload, this.types);
+            break;
+          }
         case PacketType.Data:
         default:
           if (header.packetType !== PacketType.Data) {

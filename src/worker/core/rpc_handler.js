@@ -84,6 +84,10 @@ function buildPeerCenterResponseMap(groupKey, state) {
 }
 
 function sendRpcResponse(ws, toPeerId, reqRpcPacket, types, responseBodyBytes) {
+  if (!ws || ws.readyState !== 1) { // WS_OPEN
+    console.error(`sendRpcResponse aborted: socket not open (readyState=${ws ? ws.readyState : 'nil'}) toPeer=${toPeerId}`);
+    return;
+  }
   const compressEnabled = process.env.EASYTIER_COMPRESS_RPC !== '0';
   let responseBody = responseBodyBytes;
   let compressionInfo = { algo: 1, acceptedAlgo: 1 };
@@ -116,9 +120,13 @@ function sendRpcResponse(ws, toPeerId, reqRpcPacket, types, responseBodyBytes) {
     compressionInfo,
   };
   const rpcPacketBytes = types.RpcPacket.encode(rpcRespPacket).finish();
-  const out = wrapPacket(createHeader, MY_PEER_ID, toPeerId, PacketType.RpcResp, rpcPacketBytes, ws);
-  console.log(`RpcResp -> ${toPeerId} txLen=${out.length} txTransaction=${reqRpcPacket.transactionId}`);
-  ws.send(out);
+  const buf = wrapPacket(createHeader, MY_PEER_ID, toPeerId, PacketType.RpcResp, rpcPacketBytes, ws);
+  try {
+    ws.send(buf);
+    console.log(`RpcResp -> to=${toPeerId} txLen=${buf.length} txTransaction=${reqRpcPacket.transactionId}`);
+  } catch (e) {
+    console.error(`sendRpcResponse to ${toPeerId} failed: ${e.message}`);
+  }
 }
 
 export function handleRpcReq(ws, header, payload, types) {
@@ -215,6 +223,60 @@ export function handleRpcReq(ws, header, payload, types) {
 
   } catch (e) {
     console.error('RPC Decode error:', e);
+  }
+}
+
+export function handleRpcResp(ws, header, payload, types) {
+  try {
+    console.log(`RpcResp <- from=${header.fromPeerId} to=${header.toPeerId} len=${payload.length}`);
+    const rpcPacket = types.RpcPacket.decode(payload);
+    if (rpcPacket.compressionInfo && rpcPacket.compressionInfo.algo > 1 && isCompressionAvailable()) {
+      try {
+        rpcPacket.body = gunzipMaybe(rpcPacket.body);
+        rpcPacket.compressionInfo.algo = 1;
+      } catch (e) {
+        console.error(`RpcResp decompress failed from ${header.fromPeerId}: ${e.message}`);
+        return;
+      }
+    }
+
+    const descriptor = rpcPacket.descriptor || {};
+    let rpcRespBody = rpcPacket.body;
+    // Generic RpcResponse decode first (outer wrapper)
+    let rpcResponseDecoded = null;
+    try {
+      rpcResponseDecoded = types.RpcResponse.decode(rpcRespBody);
+      rpcRespBody = rpcResponseDecoded.response || rpcRespBody;
+    } catch (e) {
+      // keep raw body for best-effort handling below
+      console.warn(`RpcResp wrapper decode failed from ${header.fromPeerId}: ${e.message}`);
+    }
+    // Handle SyncRouteInfoResponse ack (OspfRouteRpc)
+    if ((descriptor.serviceName === 'peer_rpc.OspfRouteRpc' || descriptor.serviceName === 'OspfRouteRpc')
+      && (descriptor.protoName === 'peer_rpc' || descriptor.protoName === 'peer_rpc.OspfRouteRpc' || descriptor.protoName === 'OspfRouteRpc' || !descriptor.protoName)) {
+      try {
+        const resp = types.SyncRouteInfoResponse.decode(rpcRespBody);
+        const sessionId = resp && resp.sessionId ? resp.sessionId : null;
+        if (sessionId && ws && ws.groupKey !== undefined) {
+          pm().onRouteSessionAck(ws.groupKey, header.fromPeerId, sessionId, ws.weAreInitiator);
+          console.log(`RpcResp SyncRouteInfoResponse from=${header.fromPeerId} sessionId=${sessionId} acked`);
+        }
+      } catch (e) {
+        console.error(`Decode SyncRouteInfoResponse failed from ${header.fromPeerId}: ${e.message}`);
+      }
+      return;
+    }
+
+    // Generic RpcResponse logging
+    if (rpcResponseDecoded) {
+      if (rpcResponseDecoded.error) {
+        console.warn(`RpcResp error from ${header.fromPeerId}:`, rpcResponseDecoded.error);
+      } else {
+        console.log(`RpcResp from=${header.fromPeerId} ok`);
+      }
+    }
+  } catch (e) {
+    console.error('RPC Resp Decode error:', e);
   }
 }
 
